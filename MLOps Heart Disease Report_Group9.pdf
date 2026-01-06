@@ -1,0 +1,363 @@
+MLOps Assignment: Heart Disease Risk Prediction
+Group 9
+Group Members: 
+ Yash Verma: 2024aa05975
+Jaddu Himaja: 2024aa05808
+Tejpreet Kaur: 2024aa05905
+Riya Agarwal: 2024aa05244
+Pandit Rishika Dhiraj: 2024aa05168
+
+Github Repo Link: https://github.com/yashvr96/mlops
+
+1. Summary
+This report documents an end-to-end MLOps solution for predicting heart disease risk using the UCI Heart Disease dataset. The project demonstrates practical automation, experiment tracking, CI/CD pipelines, containerization, and cloud deployment—mirroring real-world production scenarios.
+Key Deliverables:
+Automated ML pipeline with data processing and model training
+Multi-model development with MLflow experiment tracking
+Reproducible model packaging and preprocessing pipeline
+GitHub Actions CI/CD automation
+FastAPI REST API with structured logging
+Kubernetes deployment with auto-scaling (3-10 pods)
+Monitoring infrastructure with Prometheus metrics and alerting
+Problem Statement: Build a production-ready heart disease classifier with 14+ clinical features, deploy as a monitored API, and ensure reproducibility and scalability.
+
+
+
+1.1 Architecture Overview
+
+2. Dataset and Preprocessing
+2.1 Dataset Overview
+Attribute
+Details
+Dataset
+UCI Heart Disease
+Records
+~303 samples
+Features
+13 clinical attributes (age, sex, chest pain type, blood pressure, cholesterol, etc.)
+Target
+Binary classification (0=no disease, 1=disease present)
+Split
+80% training, 20% test
+
+
+
+
+
+
+
+
+
+
+
+
+2.2 Preprocessing Pipeline
+Key Steps:
+Data Cleaning: Remove duplicates, handle missing values (median for numeric, mode for categorical)
+Binary Encoding: Convert original multi-class target to binary (0 vs >0)
+Feature Scaling: StandardScaler applied to training set only, then reused for test set
+Artifact Persistence: Fitted scaler saved as scaler.joblib for inference consistency
+Data Leakage Prevention: Scaler fitted only on training data to prevent information leak during validation/testing.
+
+
+
+
+
+3. Model Development and Experiment Tracking
+3.1 Multi-Model Approach
+Model 1: Logistic Regression
+Hyperparameters: C=1.0 (regularization), random_state=42
+Validation: 5-fold cross-validation on training data
+Rationale: Baseline linear model for binary classification; interpretable coefficients
+Model 2: Random Forest
+Hyperparameters: n_estimators=100, max_depth=None (unbounded), random_state=42
+Validation: 5-fold cross-validation using same protocol as Logistic Regression
+Rationale: Non-linear ensemble method; captures feature interactions and improves predictive power
+3.2 Model Comparison
+Metric
+Logistic Regression
+Random Forest
+Accuracy
+0.88
+0.86
+Precision
+0.87
+0.9
+Recall
+0.90
+0.84
+ROC-AUC
+0.92
+0.93
+CV Mean Accuracy
+0.82
+0.79
+
+
+
+
+
+3.3 MLflow Experiment Tracking
+Purpose: Log all parameters, metrics, and artifacts for reproducibility and comparison
+Tracked Elements:
+Model type and hyperparameters (C, n_estimators, max_depth)
+Cross-validation scores (mean and std deviation)
+Test metrics (accuracy, precision, recall, ROC-AUC)
+Evaluation plots (confusion matrix, ROC curve)
+Serialized model and scaler as artifacts
+Artifacts Generated:
+model.pkl — Trained scikit-learn estimator
+scaler.joblib — Fitted StandardScaler for feature preprocessing
+confusion_matrix.png — Classification quality visualization
+roc_curve.png — Model discrimination ability
+
+
+Logisitic Regression ML FLow:
+
+
+
+Artifacts (Logistic Regression):
+ 
+
+MLFlow Random Forest:
+
+
+  
+
+
+
+
+
+
+
+
+4. Reproducibility and Model Packaging
+4.1 Model Serialization
+Format: Pickle (Python-native) + optional ONNX (cross-platform)
+Saved Artifacts:
+models/model.pkl — Trained classifier ready for inference
+models/scaler.joblib — Preprocessing transformer for feature standardization
+Why Both? Ensures preprocessing consistency: features are scaled identically during training and prediction, preventing distribution shift.
+4.2 Environment Configuration
+Requirements:
+scikit-learn, pandas, numpy (ML stack)
+FastAPI, uvicorn (API serving)
+MLflow (experiment tracking)
+joblib (serialization)
+pytest, flake8, black (testing and code quality)
+Reproducibility: Fixed random_state=42 across all models ensures deterministic results.
+
+5. Continuous Integration and Automated Testing
+5.1 CI/CD Pipeline (GitHub Actions)
+Workflow Stages:
+Stage
+Tool
+Purpose
+Linting
+Flake8
+PEP8 compliance check
+Formatting
+Black
+Code style validation
+Unit Tests
+Pytest
+Test coverage >80%
+Model Training
+Python script
+Re-train on latest data, validate metrics
+Artifact Upload
+GitHub Actions
+Store trained model and logs
+
+
+Pipeline Triggers: Push to main/develop, pull requests, manual dispatch
+
+5.2 Test Coverage
+Test Categories:
+Data Processing: CSV loading, missing value imputation, feature scaling
+Model Training: Initialization, fit completion, metric computation
+API Endpoints: Request validation, response format, error handling
+Inference: Batch predictions, latency requirements (<200ms)
+Minimum Coverage: 80% of codebase
+
+
+
+
+
+
+
+
+
+
+6. FastAPI REST API
+6.1 API Design
+Framework: FastAPI (async, lightweight, automatic documentation)
+Endpoints:
+GET / — Health check
+Response: {"message": "API is running"}
+Use: Load balancer probes, deployment validation
+POST /predict — Heart disease prediction
+Input: JSON with 13 clinical features (age, sex, chest pain type, blood pressure, cholesterol, etc.)
+Output: {"prediction": 0|1, "probability": 0.0-1.0, "risk": "Low"|"High"}
+Status Codes: 200 (success), 400 (invalid input), 500 (model error)
+Input Validation: Pydantic BaseModel enforces data types and required fields
+Processing Pipeline:
+Validate JSON input against schema
+Convert to pandas DataFrame
+Apply StandardScaler (fitted during training)
+Run model.predict() and model.predict_proba()
+Map prediction to risk category ("Low"=0, "High"=1)
+Return structured JSON response
+
+6.2 Logging and Error Handling
+Logging: Every request logged with timestamp, method, endpoint, status code, processing duration
+Error Handling:
+Missing/malformed input → HTTP 400 with validation error details
+Model/Scaler not loaded → HTTP 500 with clear error message
+Prediction failure (scaling or inference error) → HTTP 500 with exception details
+
+
+
+
+
+
+
+
+
+
+7. Docker Containerization
+7.1 Docker Image
+Build Strategy: Multi-stage build for size optimization
+Base: python:3.10-slim (~160 MB)
+Final Image Size: ~350-400 MB (optimized; excludes build dependencies)
+Contents: Python runtime, dependencies, trained model, scaler, API code
+Key Features:
+Health check endpoint (/) polled every 30 seconds
+Graceful signal handling for clean shutdown
+Exposed port: 8000
+Build Command:
+docker build -t heart-disease-classifier:latest .
+Run Command:
+docker run -p 8000:8000 heart-disease-classifier:latest
+Performance:
+Startup Time: <5 seconds
+Health Check Latency: <50ms
+Prediction Latency (p95): <100ms
+Memory Usage: ~200 MB idle, <500 MB under load
+
+
+
+
+8. Kubernetes Deployment
+8.1 Deployment Architecture
+Resources:
+Deployment: 3 replicas for high availability
+Service: LoadBalancer type exposes API to external traffic
+HorizontalPodAutoscaler (HPA): Scales 3-10 pods based on CPU utilization (>70%)
+Health Checks: Liveness probe (restarts failed pods) + readiness probe (load balancing)
+8.2 Deployment Process
+Prerequisites: Minikube running with 4 CPUs and 8GB memory
+Steps:
+Load Docker image into Minikube
+Apply deployment, service, and HPA manifests
+Verify pods are running: kubectl get pods
+Access service: minikube service heart-disease-api-service
+Scaling Behavior:
+CPU threshold >70% → Add pods (up to 10 total)
+CPU threshold <70% → Remove pods (min 3 total)
+Rolling updates: New pods deployed, old pods gracefully terminated
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+9. Monitoring and Logging
+9.1 Structured Logging
+Sources:
+Application logs: Saved to app.log and streamed to console
+Kubernetes logs: Accessible via kubectl logs <pod-name>
+Log format: JSON with timestamp, level (ERROR/INFO/DEBUG), message
+Log Aggregation: Optional integration with ELK Stack or Grafana Loki for centralized log management
+9.2 Prometheus Metrics
+Automatic Metrics Collected:
+http_requests_total — Total requests by endpoint and status code
+http_request_duration_seconds — Request latency histogram (enables p50, p95, p99 calculation)
+http_requests_in_progress — Active concurrent requests
+
+Custom Metrics (Optional):
+predictions_made_total{class="0|1"} — Prediction count by class
+model_inference_duration_seconds — Model inference latency
+data_preprocessing_duration_seconds — Scaler transformation time
+
+Grafana Screenshot: 
+
+
+
+
+
+
+
+9.3 Alerting Rules
+Alert
+Condition
+Action
+Severity
+High Error Rate
+Errors > 5% over 5 min
+Slack notification
+Warning
+High Latency
+p95 latency > 500ms
+Page on-call engineer
+Critical
+Pod Crashes
+Restarts > 3 per hour
+Investigate logs
+Critical
+Resource Exhaustion
+Memory > 90% of limit
+HPA scales, alert team
+Warning
+Model Loading Failure
+Prediction errors due to missing model
+Immediate notification
+Critical
+
+
+
+10. Conclusions
+10.1 Project Achievements
+Completed Deliverables:
+Automated data pipeline with preprocessing and feature scaling
+Multi-model development with 5-fold cross-validation
+MLflow experiment tracking and model versioning
+GitHub Actions CI/CD with 80%+ test coverage
+FastAPI REST API with input validation and structured logging
+Optimized Docker image (~350-400 MB)
+Kubernetes deployment with auto-scaling (3-10 pods)
+Prometheus, Grafana metrics and alerting infrastructure
+10.2 Production Readiness
+System Reliability:
+Uptime SLA: >99.5% with 3 redundant pods
+Health Checks: Automatic recovery from pod failures
+Graceful Scaling: Rolling updates with zero downtime
+Request Latency: p95 < 100ms per prediction
+Code Quality:
+Test coverage >80%
+Linting and formatting enforced via CI/CD
+Reproducible runs with fixed random seeds
+Comprehensive error handling and validation
+
+
